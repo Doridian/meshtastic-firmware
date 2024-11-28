@@ -17,6 +17,7 @@ enum configNames {
     use_rf95,
     use_sx1280,
     use_sx1268,
+    use_lr1121,
     user,
     gpiochip,
     spidev,

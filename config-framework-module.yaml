@@ -1,0 +1,37 @@
+---
+Lora:
+  Module: lr1121
+  spiSpeed: 2000000
+
+  CS: 8
+
+  DIO9: 2
+  DIO8: 3
+  Busy: 6
+  Reset: 7
+  DIO3_TCXO_VOLTAGE: 3.0
+
+  spidev: hidraw3
+  #spidev: usb2spi_bridge0
+  #gpiochip: 0
+
+GPIO:
+  #User: 8
+
+Input:
+### Configure device for direct keyboard input
+#  KeyboardDevice: /dev/input/by-id/usb-_Raspberry_Pi_Internal_Keyboard-event-kbd
+###
+
+Logging:
+  LogLevel: debug # debug, info, warn, error
+#  TraceFile: /var/log/meshtasticd.json
+#  AsciiLogs: true     # default if not specified is !isatty() on stdout
+
+Webserver:
+#  Port: 443 # Port for Webserver & Webservices
+#  RootPath: /usr/share/doc/meshtasticd/web # Root Dir of WebServer
+
+General:
+  MaxNodes: 200
+  MaxMessageQueue: 100

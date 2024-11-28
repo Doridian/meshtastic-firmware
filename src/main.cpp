@@ -878,6 +878,21 @@ void setup()
                 LOG_INFO("SX1268 init success");
             }
         }
+    } else if (settingsMap[use_lr1121]) {
+        if (!rIf) {
+            LOG_DEBUG("Activate lr1121 radio on SPI port %s", settingsStrings[spidev].c_str());
+            LockingArduinoHal *RadioLibHAL = new LockingArduinoHal(SPI, spiSettings);
+            rIf = new LR1121Interface((LockingArduinoHal *)RadioLibHAL, settingsMap[cs], settingsMap[irq], settingsMap[reset],
+                                      settingsMap[busy]);
+            if (!rIf->init()) {
+                LOG_WARN("No LR1121 radio");
+                delete rIf;
+                rIf = NULL;
+                exit(EXIT_FAILURE);
+            } else {
+                LOG_INFO("LR1121 init success");
+            }
+        }
     }
 
 #elif defined(HW_SPI1_DEVICE)

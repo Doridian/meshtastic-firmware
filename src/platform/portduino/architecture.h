@@ -1,5 +1,7 @@
 #pragma once
 
+#include "platform/portduino/mcspi/mcspi.h"
+
 #define ARCH_PORTDUINO 1
 
 //
@@ -17,3 +19,12 @@
 #ifndef HAS_TELEMETRY
 #define HAS_TELEMETRY 1
 #endif
+
+#define LR11X0_DIO3_TCXO_VOLTAGE 3.0
+
+#define RADIOLIB_DEFAULT_SPI MCSPI
+#undef SPI
+#define SPI MCSPI
+
+// #undef digitalRead
+// #define digitalRead(pin) SPI.gpioRead(pin)
