@@ -16,6 +16,7 @@ typedef uint32_t PacketId; // A packet sequence number
 #define ERRNO_NO_INTERFACES 33
 #define ERRNO_UNKNOWN 32                   // pick something that doesn't conflict with RH_ROUTER_ERROR_UNABLE_TO_DELIVER
 #define ERRNO_DISABLED 34                  // the interface is disabled
+#define ERRNO_SHOULD_RELEASE 35            // no error, but the packet should still be released
 #define ID_COUNTER_MASK (UINT32_MAX >> 22) // mask to select the counter portion of the ID
 
 /*
@@ -50,5 +51,13 @@ extern Allocator<meshtastic_MeshPacket> &packetPool;
  */
 NodeNum getFrom(const meshtastic_MeshPacket *p);
 
+// Returns true if the packet originated from the local node
+bool isFromUs(const meshtastic_MeshPacket *p);
+
+// Returns true if the packet is destined to us
+bool isToUs(const meshtastic_MeshPacket *p);
+
 /* Some clients might not properly set priority, therefore we fix it here. */
 void fixPriority(meshtastic_MeshPacket *p);
+
+bool isBroadcast(uint32_t dest);

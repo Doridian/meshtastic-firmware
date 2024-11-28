@@ -5,6 +5,7 @@
 #include "concurrency/NotifiedWorkerThread.h"
 
 #include <RadioLib.h>
+#include <sys/types.h>
 
 // ESP32 has special rules about ISR code
 #ifdef ARDUINO_ARCH_ESP32
@@ -107,7 +108,7 @@ class RadioLibInterface : public RadioInterface, protected concurrency::Notified
     /**
      * Debugging counts
      */
-    uint32_t rxBad = 0, rxGood = 0, txGood = 0;
+    uint32_t rxBad = 0, rxGood = 0, txGood = 0, txRelay = 0;
 
   public:
     RadioLibInterface(LockingArduinoHal *hal, RADIOLIB_PIN_TYPE cs, RADIOLIB_PIN_TYPE irq, RADIOLIB_PIN_TYPE rst,
@@ -161,12 +162,17 @@ class RadioLibInterface : public RadioInterface, protected concurrency::Notified
 
     /** start an immediate transmit
      *  This method is virtual so subclasses can hook as needed, subclasses should not call directly
+     *  @return true if packet was sent
      */
-    virtual void startSend(meshtastic_MeshPacket *txp);
+    virtual bool startSend(meshtastic_MeshPacket *txp);
 
     meshtastic_QueueStatus getQueueStatus();
 
   protected:
+    uint32_t activeReceiveStart = 0;
+
+    bool receiveDetected(uint16_t irq, ulong syncWordHeaderValidFlag, ulong preambleDetectedFlag);
+
     /** Do any hardware setup needed on entry into send configuration for the radio.
      * Subclasses can customize, but must also call this base method */
     virtual void configHardwareForSend();
@@ -192,4 +198,6 @@ class RadioLibInterface : public RadioInterface, protected concurrency::Notified
      * Subclasses must override, implement and then call into this base class implementation
      */
     virtual void setStandby();
+
+    const char *radioLibErr = "RadioLib err=";
 };

@@ -10,6 +10,7 @@
 #include "PowerFSM.h"
 #include "RTC.h"
 #include "Router.h"
+#include "UnitConversions.h"
 #include "main.h"
 #include "power.h"
 #include "sleep.h"
@@ -24,6 +25,7 @@
 #include "Sensor/BMP085Sensor.h"
 #include "Sensor/BMP280Sensor.h"
 #include "Sensor/BMP3XXSensor.h"
+#include "Sensor/CGRadSensSensor.h"
 #include "Sensor/DFRobotLarkSensor.h"
 #include "Sensor/LPS22HBSensor.h"
 #include "Sensor/MCP9808Sensor.h"
@@ -59,11 +61,13 @@ BMP3XXSensor bmp3xxSensor;
 #ifdef T1000X_SENSOR_EN
 T1000xSensor t1000xSensor;
 #endif
+CGRadSensSensor cgRadSens;
 
 #define FAILED_STATE_SENSOR_READ_MULTIPLIER 10
 #define DISPLAY_RECEIVEID_MEASUREMENTS_ON_SCREEN true
 
 #include "graphics/ScreenFonts.h"
+#include <Throttle.h>
 
 int32_t EnvironmentTelemetryModule::runOnce()
 {
@@ -71,8 +75,8 @@ int32_t EnvironmentTelemetryModule::runOnce()
         sleepOnNextExecution = false;
         uint32_t nightyNightMs = Default::getConfiguredOrDefaultMs(moduleConfig.telemetry.environment_update_interval,
                                                                    default_telemetry_broadcast_interval_secs);
-        LOG_DEBUG("Sleeping for %ims, then awaking to send metrics again.\n", nightyNightMs);
-        doDeepSleep(nightyNightMs, true);
+        LOG_DEBUG("Sleep for %ims, then awake to send metrics again", nightyNightMs);
+        doDeepSleep(nightyNightMs, true, false);
     }
 
     uint32_t result = UINT32_MAX;
@@ -82,7 +86,7 @@ int32_t EnvironmentTelemetryModule::runOnce()
     */
 
     // moduleConfig.telemetry.environment_measurement_enabled = 1;
-    //  moduleConfig.telemetry.environment_screen_enabled = 1;
+    // moduleConfig.telemetry.environment_screen_enabled = 1;
     // moduleConfig.telemetry.environment_update_interval = 15;
 
     if (!(moduleConfig.telemetry.environment_measurement_enabled || moduleConfig.telemetry.environment_screen_enabled)) {
@@ -95,7 +99,7 @@ int32_t EnvironmentTelemetryModule::runOnce()
         firstTime = 0;
 
         if (moduleConfig.telemetry.environment_measurement_enabled) {
-            LOG_INFO("Environment Telemetry: Initializing\n");
+            LOG_INFO("Environment Telemetry: init");
             // it's possible to have this module enabled, only for displaying values on the screen.
             // therefore, we should only enable the sensor loop if measurement is also enabled
 #ifdef T1000X_SENSOR_EN
@@ -143,6 +147,10 @@ int32_t EnvironmentTelemetryModule::runOnce()
                 result = mlx90632Sensor.runOnce();
             if (nau7802Sensor.hasSensor())
                 result = nau7802Sensor.runOnce();
+            if (max17048Sensor.hasSensor())
+                result = max17048Sensor.runOnce();
+            if (cgRadSens.hasSensor())
+                result = cgRadSens.runOnce();
 #endif
         }
         return result;
@@ -155,21 +163,20 @@ int32_t EnvironmentTelemetryModule::runOnce()
                 result = bme680Sensor.runTrigger();
         }
 
-        uint32_t now = millis();
         if (((lastSentToMesh == 0) ||
-             ((now - lastSentToMesh) >=
-              Default::getConfiguredOrDefaultMsScaled(moduleConfig.telemetry.environment_update_interval,
-                                                      default_telemetry_broadcast_interval_secs, numOnlineNodes))) &&
+             !Throttle::isWithinTimespanMs(lastSentToMesh, Default::getConfiguredOrDefaultMsScaled(
+                                                               moduleConfig.telemetry.environment_update_interval,
+                                                               default_telemetry_broadcast_interval_secs, numOnlineNodes))) &&
             airTime->isTxAllowedChannelUtil(config.device.role != meshtastic_Config_DeviceConfig_Role_SENSOR) &&
             airTime->isTxAllowedAirUtil()) {
             sendTelemetry();
-            lastSentToMesh = now;
-        } else if (((lastSentToPhone == 0) || ((now - lastSentToPhone) >= sendToPhoneIntervalMs)) &&
+            lastSentToMesh = millis();
+        } else if (((lastSentToPhone == 0) || !Throttle::isWithinTimespanMs(lastSentToPhone, sendToPhoneIntervalMs)) &&
                    (service->isToPhoneQueueEmpty())) {
             // Just send to phone when it's not our time to send to mesh yet
             // Only send while queue is empty (phone assumed connected)
             sendTelemetry(NODENUM_BROADCAST, true);
-            lastSentToPhone = now;
+            lastSentToPhone = millis();
         }
     }
     return min(sendToPhoneIntervalMs, result);
@@ -178,23 +185,6 @@ int32_t EnvironmentTelemetryModule::runOnce()
 bool EnvironmentTelemetryModule::wantUIFrame()
 {
     return moduleConfig.telemetry.environment_screen_enabled;
-}
-
-float EnvironmentTelemetryModule::CelsiusToFahrenheit(float c)
-{
-    return (c * 9) / 5 + 32;
-}
-
-uint32_t GetTimeSinceMeshPacket(const meshtastic_MeshPacket *mp)
-{
-    uint32_t now = getTime();
-
-    uint32_t last_seen = mp->rx_time;
-    int delta = (int)(now - last_seen);
-    if (delta < 0) // our clock must be slightly off still - not set from GPS yet
-        delta = 0;
-
-    return delta;
 }
 
 void EnvironmentTelemetryModule::drawFrame(OLEDDisplay *display, OLEDDisplayUiState *state, int16_t x, int16_t y)
@@ -211,10 +201,10 @@ void EnvironmentTelemetryModule::drawFrame(OLEDDisplay *display, OLEDDisplayUiSt
 
     // Decode the last measurement packet
     meshtastic_Telemetry lastMeasurement;
-    uint32_t agoSecs = GetTimeSinceMeshPacket(lastMeasurementPacket);
+    uint32_t agoSecs = service->GetTimeSinceMeshPacket(lastMeasurementPacket);
     const char *lastSender = getSenderShortName(*lastMeasurementPacket);
 
-    auto &p = lastMeasurementPacket->decoded;
+    const meshtastic_Data &p = lastMeasurementPacket->decoded;
     if (!pb_decode_from_bytes(p.payload.bytes, p.payload.size, &meshtastic_Telemetry_msg, &lastMeasurement)) {
         display->drawString(x, y, "Measurement Error");
         LOG_ERROR("Unable to decode last packet");
@@ -224,15 +214,19 @@ void EnvironmentTelemetryModule::drawFrame(OLEDDisplay *display, OLEDDisplayUiSt
     // Display "Env. From: ..." on its own
     display->drawString(x, y, "Env. From: " + String(lastSender) + "(" + String(agoSecs) + "s)");
 
-    String last_temp = String(lastMeasurement.variant.environment_metrics.temperature, 0) + "°C";
-    if (moduleConfig.telemetry.environment_display_fahrenheit) {
-        last_temp = String(CelsiusToFahrenheit(lastMeasurement.variant.environment_metrics.temperature), 0) + "°F";
-    }
+    if (lastMeasurement.variant.environment_metrics.has_temperature ||
+        lastMeasurement.variant.environment_metrics.has_relative_humidity) {
+        String last_temp = String(lastMeasurement.variant.environment_metrics.temperature, 0) + "°C";
+        if (moduleConfig.telemetry.environment_display_fahrenheit) {
+            last_temp =
+                String(UnitConversions::CelsiusToFahrenheit(lastMeasurement.variant.environment_metrics.temperature), 0) + "°F";
+        }
 
-    // Continue with the remaining details
-    display->drawString(x, y += _fontHeight(FONT_SMALL),
-                        "Temp/Hum: " + last_temp + " / " +
-                            String(lastMeasurement.variant.environment_metrics.relative_humidity, 0) + "%");
+        // Continue with the remaining details
+        display->drawString(x, y += _fontHeight(FONT_SMALL),
+                            "Temp/Hum: " + last_temp + " / " +
+                                String(lastMeasurement.variant.environment_metrics.relative_humidity, 0) + "%");
+    }
 
     if (lastMeasurement.variant.environment_metrics.barometric_pressure != 0) {
         display->drawString(x, y += _fontHeight(FONT_SMALL),
@@ -256,6 +250,10 @@ void EnvironmentTelemetryModule::drawFrame(OLEDDisplay *display, OLEDDisplayUiSt
     if (lastMeasurement.variant.environment_metrics.weight != 0)
         display->drawString(x, y += _fontHeight(FONT_SMALL),
                             "Weight: " + String(lastMeasurement.variant.environment_metrics.weight, 0) + "kg");
+
+    if (lastMeasurement.variant.environment_metrics.radiation != 0)
+        display->drawString(x, y += _fontHeight(FONT_SMALL),
+                            "Rad: " + String(lastMeasurement.variant.environment_metrics.radiation, 2) + "µR/h");
 }
 
 bool EnvironmentTelemetryModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtastic_Telemetry *t)
@@ -265,16 +263,18 @@ bool EnvironmentTelemetryModule::handleReceivedProtobuf(const meshtastic_MeshPac
         const char *sender = getSenderShortName(mp);
 
         LOG_INFO("(Received from %s): barometric_pressure=%f, current=%f, gas_resistance=%f, relative_humidity=%f, "
-                 "temperature=%f\n",
+                 "temperature=%f",
                  sender, t->variant.environment_metrics.barometric_pressure, t->variant.environment_metrics.current,
                  t->variant.environment_metrics.gas_resistance, t->variant.environment_metrics.relative_humidity,
                  t->variant.environment_metrics.temperature);
-        LOG_INFO("(Received from %s): voltage=%f, IAQ=%d, distance=%f, lux=%f\n", sender, t->variant.environment_metrics.voltage,
+        LOG_INFO("(Received from %s): voltage=%f, IAQ=%d, distance=%f, lux=%f", sender, t->variant.environment_metrics.voltage,
                  t->variant.environment_metrics.iaq, t->variant.environment_metrics.distance, t->variant.environment_metrics.lux);
 
-        LOG_INFO("(Received from %s): wind speed=%fm/s, direction=%d degrees, weight=%fkg\n", sender,
+        LOG_INFO("(Received from %s): wind speed=%fm/s, direction=%d degrees, weight=%fkg", sender,
                  t->variant.environment_metrics.wind_speed, t->variant.environment_metrics.wind_direction,
                  t->variant.environment_metrics.weight);
+
+        LOG_INFO("(Received from %s): radiation=%fµR/h", sender, t->variant.environment_metrics.radiation);
 
 #endif
         // release previous packet before occupying a new spot
@@ -386,16 +386,26 @@ bool EnvironmentTelemetryModule::getEnvironmentTelemetry(meshtastic_Telemetry *m
         } else if (bmp280Sensor.hasSensor()) {
             // prefer bmp280 temp if both sensors are present, fetch only humidity
             meshtastic_Telemetry m_ahtx = meshtastic_Telemetry_init_zero;
-            LOG_INFO("AHTX0+BMP280 module detected: using temp from BMP280 and humy from AHTX0\n");
+            LOG_INFO("AHTX0+BMP280 module detected: using temp from BMP280 and humy from AHTX0");
             aht10Sensor.getMetrics(&m_ahtx);
             m->variant.environment_metrics.relative_humidity = m_ahtx.variant.environment_metrics.relative_humidity;
+            m->variant.environment_metrics.has_relative_humidity = m_ahtx.variant.environment_metrics.has_relative_humidity;
         } else {
             // prefer bmp3xx temp if both sensors are present, fetch only humidity
             meshtastic_Telemetry m_ahtx = meshtastic_Telemetry_init_zero;
-            LOG_INFO("AHTX0+BMP3XX module detected: using temp from BMP3XX and humy from AHTX0\n");
+            LOG_INFO("AHTX0+BMP3XX module detected: using temp from BMP3XX and humy from AHTX0");
             aht10Sensor.getMetrics(&m_ahtx);
             m->variant.environment_metrics.relative_humidity = m_ahtx.variant.environment_metrics.relative_humidity;
+            m->variant.environment_metrics.has_relative_humidity = m_ahtx.variant.environment_metrics.has_relative_humidity;
         }
+    }
+    if (max17048Sensor.hasSensor()) {
+        valid = valid && max17048Sensor.getMetrics(m);
+        hasSensor = true;
+    }
+    if (cgRadSens.hasSensor()) {
+        valid = valid && cgRadSens.getMetrics(m);
+        hasSensor = true;
     }
 
 #endif
@@ -413,14 +423,14 @@ meshtastic_MeshPacket *EnvironmentTelemetryModule::allocReply()
         if (pb_decode_from_bytes(p.payload.bytes, p.payload.size, &meshtastic_Telemetry_msg, &scratch)) {
             decoded = &scratch;
         } else {
-            LOG_ERROR("Error decoding EnvironmentTelemetry module!\n");
+            LOG_ERROR("Error decoding EnvironmentTelemetry module!");
             return NULL;
         }
         // Check for a request for environment metrics
         if (decoded->which_variant == meshtastic_Telemetry_environment_metrics_tag) {
             meshtastic_Telemetry m = meshtastic_Telemetry_init_zero;
             if (getEnvironmentTelemetry(&m)) {
-                LOG_INFO("Environment telemetry replying to request\n");
+                LOG_INFO("Environment telemetry reply to request");
                 return allocDataProtobuf(m);
             } else {
                 return NULL;
@@ -440,15 +450,17 @@ bool EnvironmentTelemetryModule::sendTelemetry(NodeNum dest, bool phoneOnly)
 #else
     if (getEnvironmentTelemetry(&m)) {
 #endif
-        LOG_INFO("(Sending): barometric_pressure=%f, current=%f, gas_resistance=%f, relative_humidity=%f, temperature=%f\n",
+        LOG_INFO("Send: barometric_pressure=%f, current=%f, gas_resistance=%f, relative_humidity=%f, temperature=%f",
                  m.variant.environment_metrics.barometric_pressure, m.variant.environment_metrics.current,
                  m.variant.environment_metrics.gas_resistance, m.variant.environment_metrics.relative_humidity,
                  m.variant.environment_metrics.temperature);
-        LOG_INFO("(Sending): voltage=%f, IAQ=%d, distance=%f, lux=%f\n", m.variant.environment_metrics.voltage,
+        LOG_INFO("Send: voltage=%f, IAQ=%d, distance=%f, lux=%f", m.variant.environment_metrics.voltage,
                  m.variant.environment_metrics.iaq, m.variant.environment_metrics.distance, m.variant.environment_metrics.lux);
 
-        LOG_INFO("(Sending): wind speed=%fm/s, direction=%d degrees, weight=%fkg\n", m.variant.environment_metrics.wind_speed,
+        LOG_INFO("Send: wind speed=%fm/s, direction=%d degrees, weight=%fkg", m.variant.environment_metrics.wind_speed,
                  m.variant.environment_metrics.wind_direction, m.variant.environment_metrics.weight);
+
+        LOG_INFO("Send: radiation=%fµR/h", m.variant.environment_metrics.radiation);
 
         sensor_read_error_count = 0;
 
@@ -465,14 +477,14 @@ bool EnvironmentTelemetryModule::sendTelemetry(NodeNum dest, bool phoneOnly)
 
         lastMeasurementPacket = packetPool.allocCopy(*p);
         if (phoneOnly) {
-            LOG_INFO("Sending packet to phone\n");
+            LOG_INFO("Send packet to phone");
             service->sendToPhone(p);
         } else {
-            LOG_INFO("Sending packet to mesh\n");
+            LOG_INFO("Send packet to mesh");
             service->sendToMesh(p, RX_SRC_LOCAL, true);
 
             if (config.device.role == meshtastic_Config_DeviceConfig_Role_SENSOR && config.power.is_power_saving) {
-                LOG_DEBUG("Starting next execution in 5 seconds and then going to sleep.\n");
+                LOG_DEBUG("Start next execution in 5s, then sleep");
                 sleepOnNextExecution = true;
                 setIntervalFromNow(5000);
             }
@@ -584,6 +596,16 @@ AdminMessageHandleResult EnvironmentTelemetryModule::handleAdminMessageForModule
     }
     if (aht10Sensor.hasSensor()) {
         result = aht10Sensor.handleAdminMessage(mp, request, response);
+        if (result != AdminMessageHandleResult::NOT_HANDLED)
+            return result;
+    }
+    if (max17048Sensor.hasSensor()) {
+        result = max17048Sensor.handleAdminMessage(mp, request, response);
+        if (result != AdminMessageHandleResult::NOT_HANDLED)
+            return result;
+    }
+    if (cgRadSens.hasSensor()) {
+        result = cgRadSens.handleAdminMessage(mp, request, response);
         if (result != AdminMessageHandleResult::NOT_HANDLED)
             return result;
     }

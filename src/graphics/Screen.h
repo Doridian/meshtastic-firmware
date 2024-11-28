@@ -24,8 +24,8 @@ class Screen
     void startFirmwareUpdateScreen() {}
     void increaseBrightness() {}
     void decreaseBrightness() {}
-    void setFunctionSymbal(std::string) {}
-    void removeFunctionSymbal(std::string) {}
+    void setFunctionSymbol(std::string) {}
+    void removeFunctionSymbol(std::string) {}
     void startAlert(const char *) {}
     void endAlert() {}
 };
@@ -282,8 +282,8 @@ class Screen : public concurrency::OSThread
     void increaseBrightness();
     void decreaseBrightness();
 
-    void setFunctionSymbal(std::string sym);
-    void removeFunctionSymbal(std::string sym);
+    void setFunctionSymbol(std::string sym);
+    void removeFunctionSymbol(std::string sym);
 
     /// Stops showing the boot screen.
     void stopBootScreen() { enqueueCmd(ScreenCmd{.cmd = Cmd::STOP_BOOT_SCREEN}); }
@@ -327,10 +327,15 @@ class Screen : public concurrency::OSThread
             SKIPREST = false;
             return (uint8_t)ch;
         }
+
+        case 0xC3: {
+            SKIPREST = false;
+            return (uint8_t)(ch | 0xC0);
+        }
         }
 
         // We want to strip out prefix chars for two-byte char formats
-        if (ch == 0xC2)
+        if (ch == 0xC2 || ch == 0xC3)
             return (uint8_t)0;
 
 #if defined(OLED_PL)
@@ -454,6 +459,9 @@ class Screen : public concurrency::OSThread
 
     void setWelcomeFrames();
 
+    // Dismiss the currently focussed frame, if possible (e.g. text message, waypoint)
+    void dismissCurrentFrame();
+
 #ifdef USE_EINK
     /// Draw an image to remain on E-Ink display after screen off
     void setScreensaverFrames(FrameCallback einkScreensaver = NULL);
@@ -503,11 +511,14 @@ class Screen : public concurrency::OSThread
     void handleStartFirmwareUpdateScreen();
 
     // Info collected by setFrames method.
-    // Index location of specific frames. Used to apply the FrameFocus parameter of setFrames
+    // Index location of specific frames.
+    // - Used to apply the FrameFocus parameter of setFrames
+    // - Used to dismiss the currently shown frame (txt; waypoint) by CardKB combo
     struct FramesetInfo {
         struct FramePositions {
             uint8_t fault = 0;
             uint8_t textMessage = 0;
+            uint8_t waypoint = 0;
             uint8_t focusedModule = 0;
             uint8_t log = 0;
             uint8_t settings = 0;
@@ -543,7 +554,7 @@ class Screen : public concurrency::OSThread
 
     static void drawDebugInfoWiFiTrampoline(OLEDDisplay *display, OLEDDisplayUiState *state, int16_t x, int16_t y);
 
-#ifdef T_WATCH_S3
+#if defined(DISPLAY_CLOCK_FRAME)
     static void drawAnalogClockFrame(OLEDDisplay *display, OLEDDisplayUiState *state, int16_t x, int16_t y);
 
     static void drawDigitalClockFrame(OLEDDisplay *display, OLEDDisplayUiState *state, int16_t x, int16_t y);
