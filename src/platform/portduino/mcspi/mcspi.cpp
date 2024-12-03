@@ -26,6 +26,7 @@ extern "C" {
 #include <memory>
 #include <iostream>
 
+
 class MCPSPIChip : public SPIChip {
   private:
     std::mutex SPIMutex;
@@ -55,7 +56,10 @@ class MCPSPIChip : public SPIChip {
       mcp2210_spi_set_transaction_size(spi_config, 8);
 			mcp2210_spi_set_bitrate(spi_config, defaultSpeed);
       mcp2210_spi_set_mode(spi_config, 0);
-      mcp2210_command(fd, spi_config, MCP2210_SPI_SET);
+
+      mcp2210_packet spi_temp = {0,};
+      memcpy(spi_temp, spi_config, MCP2210_PACKET_SIZE);
+      mcp2210_command(fd, spi_temp, MCP2210_SPI_SET);
 
       mcp2210_packet chip_packet = {0,};
 	    ret = mcp2210_command(fd, chip_packet, MCP2210_CHIP_GET);
@@ -87,25 +91,38 @@ class MCPSPIChip : public SPIChip {
      */
     int transfer(const uint8_t *outBuf, uint8_t *inBuf, size_t bufLen,
                 bool deassertCS = true) override {
-      std::cout << "MCPSPIChip:transfer(" << bufLen << " OUT=" << (outBuf != NULL) << " IN=" << (inBuf != NULL) << ")" << std::endl;
-
-      char* packet = (char*)malloc(bufLen);
+      unsigned char* packet = (unsigned char*)malloc(bufLen);
       memcpy(packet, outBuf, bufLen);
+
+      printf("MCSPI::TX(%d): ", bufLen);
+      for (int i = 0; i < bufLen; i++) {
+        printf("%02x ", packet[i]);
+      }
+      printf("\n");
 
       ChipMutex.lock();
 
       if (bufLen != mcp2210_spi_get_transaction_size(spi_config)) {
         mcp2210_spi_set_transaction_size(spi_config, bufLen);
-        mcp2210_command(fd, spi_config, MCP2210_SPI_SET);
-      }
 
-      int ret = mcp2210_spi_transfer(fd, spi_config, packet, bufLen);
+        mcp2210_packet spi_temp = {0,};
+        memcpy(spi_temp, spi_config, MCP2210_PACKET_SIZE);
+        mcp2210_command(fd, spi_temp, MCP2210_SPI_SET);
+      }
+      int ret = mcp2210_spi_transfer(fd, (char*)packet, bufLen);
       assert(ret == 0);
+
+      ChipMutex.unlock();
+
+      printf("MCSPI::RX(%d): ", bufLen);
+      for (int i = 0; i < bufLen; i++) {
+        printf("%02x ", packet[i]);
+      }
+      printf("\n");
+
       if (inBuf != NULL) {
         memcpy(inBuf, packet, bufLen);
       }
-
-      ChipMutex.unlock();
 
       free(packet);
       return 0;
@@ -122,15 +139,17 @@ class MCPSPIChip : public SPIChip {
 
       ret = mcp2210_gpio_get_pin(gpio_packet, pin);
 
-      //std::cout << "MCPGPIOREAD(" << (int)pin << " to " << ret << ")" << std::endl;
-
       ChipMutex.unlock();
       return ret;
     }
 
     void gpioWrite(uint8_t pin, PinStatus status) {
       int ret;
+
       ChipMutex.lock();
+
+      // For some reason we need to remind the MCP2210 that we want to output...
+      this->gpioSetModeUnsafe(pin, OUTPUT);
 
       mcp2210_packet gpio_packet = {0,};
 	    ret = mcp2210_command(fd, gpio_packet, MCP2210_GPIO_VAL_GET);
@@ -141,29 +160,16 @@ class MCPSPIChip : public SPIChip {
       ret = mcp2210_command(fd, gpio_packet, MCP2210_GPIO_VAL_SET);
       assert(ret >= 0);
 
-      std::cout << "MCPGPIOWRITE(" << (int)pin << " to " << status << ")" << std::endl;
-
       ChipMutex.unlock();
     }
 
     void gpioSetMode(uint8_t pin, PinMode mode) {
-      int ret;
       ChipMutex.lock();
-
-      mcp2210_packet gpio_dir_packet = {0,};
-      ret = mcp2210_command(fd, gpio_dir_packet, MCP2210_GPIO_DIR_GET);
-      assert(ret >= 0);
-
-      mcp2210_gpio_set_pin(gpio_dir_packet, pin, (mode == OUTPUT) ? 0 : 1);
-
-      ret = mcp2210_command(fd, gpio_dir_packet, MCP2210_GPIO_DIR_SET);
-      assert(ret >= 0);
-
+      this->gpioSetModeUnsafe(pin, mode);
       ChipMutex.unlock();
     }
 
     void beginTransaction(uint32_t clockSpeed) override {
-      std::cout << "MCPSPIChip:beginTransaction(" << clockSpeed << ")" << std::endl;
       SPIMutex.lock();
       if (clockSpeed <= 0) {
         clockSpeed = defaultSpeed;
@@ -174,16 +180,30 @@ class MCPSPIChip : public SPIChip {
 			mcp2210_spi_set_bitrate(spi_config, clockSpeed);
       mcp2210_command(fd, spi_config, MCP2210_SPI_SET);
 
-	    int ret = mcp2210_command(fd, spi_config, MCP2210_SPI_GET);
+      mcp2210_packet spi_temp = {0,};
+      memcpy(spi_temp, spi_config, MCP2210_PACKET_SIZE);
+	    int ret = mcp2210_command(fd, spi_temp, MCP2210_SPI_GET);
       assert(ret >= 0);
 
       ChipMutex.unlock();
     }
 
     void endTransaction() override {
-      std::cout << "MCPSPIChip:endTransaction()" << std::endl;
-			mcp2210_spi_set_bitrate(spi_config, defaultSpeed);
       SPIMutex.unlock();
+    }
+
+private:
+    void gpioSetModeUnsafe(uint8_t pin, PinMode mode) {
+      int ret;
+
+      mcp2210_packet gpio_dir_packet = {0,};
+      ret = mcp2210_command(fd, gpio_dir_packet, MCP2210_GPIO_DIR_GET);
+      assert(ret >= 0);
+
+      mcp2210_gpio_set_pin(gpio_dir_packet, pin, (mode == OUTPUT) ? 0 : 1);
+
+      ret = mcp2210_command(fd, gpio_dir_packet, MCP2210_GPIO_DIR_SET);
+      assert(ret >= 0);
     }
 };
 
@@ -201,9 +221,6 @@ public:
     }
 
     void writePin(PinStatus s) override {
-      if (GPIOPin::getPinMode() != OUTPUT) {
-        setPinMode(OUTPUT);
-      }
       this->chip->gpioWrite(this->pin, s);
       GPIOPin::writePin(s);
     }

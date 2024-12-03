@@ -5,8 +5,10 @@ Lora:
 
   CS: 8
 
-  DIO9: 2
-  DIO8: 3
+  #DIO9: 2
+  #DIO8: 3
+  IRQ: 2
+
   Busy: 6
   Reset: 7
   DIO3_TCXO_VOLTAGE: 3.0
@@ -14,9 +16,6 @@ Lora:
   spidev: mcp2210-hid
   #spidev: usb2spi_bridge0
   #gpiochip: 0
-
-GPIO:
-  #User: 8
 
 Input:
 ### Configure device for direct keyboard input

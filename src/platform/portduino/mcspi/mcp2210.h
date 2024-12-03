@@ -113,8 +113,7 @@ int mcp2210_write_eeprom(int fd, mcp2210_packet packet, unsigned short addr,
 int mcp2210_unlock_eeprom(int fd, mcp2210_packet packet, const char *passwd);
 int mcp2210_gp6_count_get(int fd, mcp2210_packet packet,
                           unsigned short no_reset);
-int mcp2210_spi_transfer(int fd, mcp2210_packet spi_packet, char *data,
-                         short len);
+int mcp2210_spi_transfer(int fd, char *data, short len);
 
 /*
  * mcp2210_command() wrappers that do some extra bits if necessary, such as set

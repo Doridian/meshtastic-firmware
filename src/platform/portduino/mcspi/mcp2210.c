@@ -182,47 +182,33 @@ int mcp2210_gp6_count_get(int fd, mcp2210_packet packet,
   return (packet[5] << 8) | packet[4];
 }
 
-int mcp2210_spi_transfer(int fd, mcp2210_packet spi_packet, char *data,
-                         short len) {
+int mcp2210_spi_transfer(int fd, char *data, short len) {
   int rd = 0, wr = 0;
-  int bit_rate = mcp2210_spi_get_bitrate(spi_packet);
   int ret;
+
+  int rd_len;
+
+  struct timespec delay;
 
   while (rd < len) {
     mcp2210_packet packet = {
         0,
     };
     int wr_len = MCP2210_SPI_CHUNK;
-    int rd_len = MCP2210_SPI_CHUNK;
-    struct timespec delay;
 
     if (wr + wr_len > len)
       wr_len = len - wr;
-    if (rd + rd_len > len)
-      rd_len = len - rd;
-
-    delay.tv_sec = rd_len * 8 / bit_rate;
-    delay.tv_nsec = (rd_len * 8 % bit_rate) * (1000000000 / bit_rate);
-    delay.tv_nsec += rd_len * mcp2210_spi_get_byte_delay_100us(spi_packet) *
-                     (100000 + 30000);
-    if (wr == 0)
-      delay.tv_nsec += mcp2210_spi_get_cs_data_delay_100us(spi_packet) * 100000;
-    if (rd + rd_len == len)
-      delay.tv_nsec +=
-          mcp2210_spi_get_data_cs_delay_100us(spi_packet) * (100000 + 30000);
-    delay.tv_sec += delay.tv_nsec / 1000000000;
-    delay.tv_nsec %= 1000000000;
 
   retry:
     packet[1] = wr_len;
-    memcpy(&packet[2], &data[wr], wr_len);
+    if (wr_len > 0)
+      memcpy(&packet[4], &data[wr], wr_len);
     ret = mcp2210_command(fd, packet, MCP2210_SPI_TRANSFER);
-
-    nanosleep(&delay, NULL);
 
     if (ret == -MCP2210_ESPIINPROGRESS) {
       delay.tv_sec = 0;
       delay.tv_nsec = 5000000;
+      nanosleep(&delay, NULL);
       goto retry;
     } else if (ret < 0) {
       return ret;
@@ -238,8 +224,10 @@ int mcp2210_spi_transfer(int fd, mcp2210_packet spi_packet, char *data,
       return -MCP2210_EBADTXSTAT;
     }
 
-    memcpy(&data[rd], &packet[4], packet[2]);
-    rd += packet[2];
+    rd_len = packet[2];
+    if (rd_len > 0)
+      memcpy(&data[rd], &packet[4], rd_len);
+    rd += rd_len;
   }
 
   return 0;
