@@ -11,7 +11,7 @@ Lora:
   Reset: 7
   DIO3_TCXO_VOLTAGE: 3.0
 
-  spidev: hidraw3
+  spidev: mcp2210-hid
   #spidev: usb2spi_bridge0
   #gpiochip: 0
 

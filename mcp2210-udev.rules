@@ -1,0 +1,2 @@
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="00de", SYMLINK+="mcp2210-hid"
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="00de", TAG+="uaccess"
