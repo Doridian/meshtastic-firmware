@@ -227,8 +227,6 @@ void portduinoSetup()
 
 int initGPIOPin(int pinNum, const std::string gpioChipName)
 {
-  return ERRNO_OK;
-
 #ifdef PORTDUINO_LINUX_HARDWARE
     std::string gpio_name = "GPIO" + std::to_string(pinNum);
     try {
