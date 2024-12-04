@@ -94,14 +94,10 @@ class MCPSPIChip : public SPIChip {
       unsigned char* packet = (unsigned char*)malloc(bufLen);
       memcpy(packet, outBuf, bufLen);
 
-      printf("MCSPI::TX(%d): ", bufLen);
-      for (int i = 0; i < bufLen; i++) {
-        printf("%02x ", packet[i]);
-      }
-      printf("\n");
-
       ChipMutex.lock();
 
+      unsigned long t1, t2;
+      t1 = micros();
       if (bufLen != mcp2210_spi_get_transaction_size(spi_config)) {
         mcp2210_spi_set_transaction_size(spi_config, bufLen);
 
@@ -109,16 +105,14 @@ class MCPSPIChip : public SPIChip {
         memcpy(spi_temp, spi_config, MCP2210_PACKET_SIZE);
         mcp2210_command(fd, spi_temp, MCP2210_SPI_SET);
       }
+      t2 = micros();
+      std::cout << "SPI set transaction size: " << (t2 - t1) << "us" << std::endl;
       int ret = mcp2210_spi_transfer(fd, (char*)packet, bufLen);
       assert(ret == 0);
+      t1 = micros();
+      std::cout << "SPI transfer: " << (t1 - t2) << "us" << std::endl;
 
       ChipMutex.unlock();
-
-      printf("MCSPI::RX(%d): ", bufLen);
-      for (int i = 0; i < bufLen; i++) {
-        printf("%02x ", packet[i]);
-      }
-      printf("\n");
 
       if (inBuf != NULL) {
         memcpy(inBuf, packet, bufLen);
