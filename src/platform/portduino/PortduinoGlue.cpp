@@ -276,7 +276,6 @@ bool loadConfig(const char *configPath)
             settingsMap[use_lr1120] = false;
             settingsMap[use_lr1121] = false;
             settingsMap[use_sx1268] = false;
-            settingsMap[use_lr1121] = false;
 
             if (yamlConfig["Lora"]["Module"] && yamlConfig["Lora"]["Module"].as<std::string>("") == "sx1262") {
                 settingsMap[use_sx1262] = true;
@@ -292,8 +291,6 @@ bool loadConfig(const char *configPath)
                 settingsMap[use_lr1121] = true;
             } else if (yamlConfig["Lora"]["Module"] && yamlConfig["Lora"]["Module"].as<std::string>("") == "sx1268") {
                 settingsMap[use_sx1268] = true;
-            } else if (yamlConfig["Lora"]["Module"] && yamlConfig["Lora"]["Module"].as<std::string>("") == "lr1121") {
-                settingsMap[use_lr1121] = true;
             }
             settingsMap[dio2_as_rf_switch] = yamlConfig["Lora"]["DIO2_AS_RF_SWITCH"].as<bool>(false);
             settingsMap[dio3_tcxo_voltage] = yamlConfig["Lora"]["DIO3_TCXO_VOLTAGE"].as<bool>(false);

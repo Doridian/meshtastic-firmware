@@ -20,7 +20,6 @@ enum configNames {
     use_lr1120,
     use_lr1121,
     use_sx1268,
-    use_lr1121,
     user,
     gpiochip,
     spidev,
