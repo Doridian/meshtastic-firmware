@@ -1,7 +1,7 @@
 #include "LIS3DHSensor.h"
 #include "NodeDB.h"
 
-#if !defined(ARCH_PORTDUINO) && !defined(ARCH_STM32WL) && !MESHTASTIC_EXCLUDE_I2C
+#if !defined(ARCH_STM32WL) && !MESHTASTIC_EXCLUDE_I2C && __has_include(<Adafruit_LIS3DH.h>)
 
 LIS3DHSensor::LIS3DHSensor(ScanI2C::FoundDevice foundDevice) : MotionSensor::MotionSensor(foundDevice) {}
 
@@ -22,7 +22,7 @@ int32_t LIS3DHSensor::runOnce()
 {
     if (sensor.getClick() > 0) {
         uint8_t click = sensor.getClick();
-        if (!config.device.double_tap_as_button_press) {
+        if (!config.device.double_tap_as_button_press && config.display.wake_on_tap_or_motion) {
             wakeScreen();
         }
 

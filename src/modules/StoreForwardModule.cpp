@@ -73,11 +73,11 @@ void StoreForwardModule::populatePSRAM()
     LOG_DEBUG("Before PSRAM init: heap %d/%d PSRAM %d/%d", memGet.getFreeHeap(), memGet.getHeapSize(), memGet.getFreePsram(),
               memGet.getPsramSize());
 
-    /* Use a maximum of 2/3 the available PSRAM unless otherwise specified.
+    /* Use a maximum of 3/4 the available PSRAM unless otherwise specified.
         Note: This needs to be done after every thing that would use PSRAM
     */
     uint32_t numberOfPackets =
-        (this->records ? this->records : (((memGet.getFreePsram() / 3) * 2) / sizeof(PacketHistoryStruct)));
+        (this->records ? this->records : (((memGet.getFreePsram() / 4) * 3) / sizeof(PacketHistoryStruct)));
     this->records = numberOfPackets;
 #if defined(ARCH_ESP32)
     this->packetHistory = static_cast<PacketHistoryStruct *>(ps_calloc(numberOfPackets, sizeof(PacketHistoryStruct)));
@@ -198,7 +198,16 @@ void StoreForwardModule::historyAdd(const meshtastic_MeshPacket &mp)
     this->packetHistory[this->packetHistoryTotalCount].to = mp.to;
     this->packetHistory[this->packetHistoryTotalCount].channel = mp.channel;
     this->packetHistory[this->packetHistoryTotalCount].from = getFrom(&mp);
+    this->packetHistory[this->packetHistoryTotalCount].id = mp.id;
+    this->packetHistory[this->packetHistoryTotalCount].reply_id = p.reply_id;
+    this->packetHistory[this->packetHistoryTotalCount].emoji = (bool)p.emoji;
     this->packetHistory[this->packetHistoryTotalCount].payload_size = p.payload.size;
+    this->packetHistory[this->packetHistoryTotalCount].rx_rssi = mp.rx_rssi;
+    this->packetHistory[this->packetHistoryTotalCount].rx_snr = mp.rx_snr;
+    this->packetHistory[this->packetHistoryTotalCount].hop_start = mp.hop_start;
+    this->packetHistory[this->packetHistoryTotalCount].hop_limit = mp.hop_limit;
+    this->packetHistory[this->packetHistoryTotalCount].via_mqtt = mp.via_mqtt;
+    this->packetHistory[this->packetHistoryTotalCount].transport_mechanism = mp.transport_mechanism;
     memcpy(this->packetHistory[this->packetHistoryTotalCount].payload, p.payload.bytes, meshtastic_Constants_DATA_PAYLOAD_LEN);
 
     this->packetHistoryTotalCount++;
@@ -244,8 +253,17 @@ meshtastic_MeshPacket *StoreForwardModule::preparePayload(NodeNum dest, uint32_t
 
                 p->to = local ? this->packetHistory[i].to : dest; // PhoneAPI can handle original `to`
                 p->from = this->packetHistory[i].from;
+                p->id = this->packetHistory[i].id;
                 p->channel = this->packetHistory[i].channel;
+                p->decoded.reply_id = this->packetHistory[i].reply_id;
                 p->rx_time = this->packetHistory[i].time;
+                p->decoded.emoji = (uint32_t)this->packetHistory[i].emoji;
+                p->rx_rssi = this->packetHistory[i].rx_rssi;
+                p->rx_snr = this->packetHistory[i].rx_snr;
+                p->hop_start = this->packetHistory[i].hop_start;
+                p->hop_limit = this->packetHistory[i].hop_limit;
+                p->via_mqtt = this->packetHistory[i].via_mqtt;
+                p->transport_mechanism = (meshtastic_MeshPacket_TransportMechanism)this->packetHistory[i].transport_mechanism;
 
                 // Let's assume that if the server received the S&F request that the client is in range.
                 //   TODO: Make this configurable.

@@ -11,6 +11,9 @@
 
 // Particular boards might define a different max power based on what their hardware can do, default to max power output if not
 // specified (may be dangerous if using external PA and SX126x power config forgotten)
+#if ARCH_PORTDUINO
+#define SX126X_MAX_POWER portduino_config.sx126x_max_power
+#endif
 #ifndef SX126X_MAX_POWER
 #define SX126X_MAX_POWER 22
 #endif
@@ -49,43 +52,42 @@ template <typename T> bool SX126xInterface<T>::init()
     pinMode(SX126X_POWER_EN, OUTPUT);
 #endif
 
-#if ARCH_PORTDUINO
-    float tcxoVoltage = 0;
-    if (settingsMap[dio3_tcxo_voltage])
-        tcxoVoltage = 1.8;
-    if (settingsMap[sx126x_ant_sw] != RADIOLIB_NC) {
-        digitalWrite(settingsMap[sx126x_ant_sw], HIGH);
-        pinMode(settingsMap[sx126x_ant_sw], OUTPUT);
-    }
-// FIXME: correct logic to default to not using TCXO if no voltage is specified for SX126X_DIO3_TCXO_VOLTAGE
-#elif !defined(SX126X_DIO3_TCXO_VOLTAGE)
-    float tcxoVoltage =
-        0; // "TCXO reference voltage to be set on DIO3. Defaults to 1.6 V, set to 0 to skip." per
-           // https://github.com/jgromes/RadioLib/blob/690a050ebb46e6097c5d00c371e961c1caa3b52e/src/modules/SX126x/SX126x.h#L471C26-L471C104
-    // (DIO3 is free to be used as an IRQ)
-#elif !defined(TCXO_OPTIONAL)
-    float tcxoVoltage = SX126X_DIO3_TCXO_VOLTAGE;
-    // (DIO3 is not free to be used as an IRQ)
+#if defined(USE_GC1109_PA)
+    pinMode(LORA_PA_POWER, OUTPUT);
+    digitalWrite(LORA_PA_POWER, HIGH);
+
+    pinMode(LORA_PA_EN, OUTPUT);
+    digitalWrite(LORA_PA_EN, LOW);
+    pinMode(LORA_PA_TX_EN, OUTPUT);
+    digitalWrite(LORA_PA_TX_EN, LOW);
 #endif
-    if (tcxoVoltage == 0)
+
+#if ARCH_PORTDUINO
+    tcxoVoltage = (float)portduino_config.dio3_tcxo_voltage / 1000;
+    if (portduino_config.lora_sx126x_ant_sw_pin.pin != RADIOLIB_NC) {
+        digitalWrite(portduino_config.lora_sx126x_ant_sw_pin.pin, HIGH);
+        pinMode(portduino_config.lora_sx126x_ant_sw_pin.pin, OUTPUT);
+    }
+#endif
+    if (tcxoVoltage == 0.0)
         LOG_DEBUG("SX126X_DIO3_TCXO_VOLTAGE not defined, not using DIO3 as TCXO reference voltage");
     else
         LOG_DEBUG("SX126X_DIO3_TCXO_VOLTAGE defined, using DIO3 as TCXO reference voltage at %f V", tcxoVoltage);
-
+    setTransmitEnable(false);
     // FIXME: May want to set depending on a definition, currently all SX126x variant files use the DC-DC regulator option
     bool useRegulatorLDO = false; // Seems to depend on the connection to pin 9/DCC_SW - if an inductor DCDC?
 
     RadioLibInterface::init();
 
-    if (power > SX126X_MAX_POWER) // Clamp power to maximum defined level
-        power = SX126X_MAX_POWER;
-
-    limitPower();
+    limitPower(SX126X_MAX_POWER);
+    // Make sure we reach the minimum power supported to turn the chip on (-9dBm)
+    if (power < -9)
+        power = -9;
 
     int res = lora.begin(getFreq(), bw, sf, cr, syncWord, power, preambleLength, tcxoVoltage, useRegulatorLDO);
     // \todo Display actual typename of the adapter, not just `SX126x`
     LOG_INFO("SX126x init result %d", res);
-    if (res == RADIOLIB_ERR_CHIP_NOT_FOUND)
+    if (res == RADIOLIB_ERR_CHIP_NOT_FOUND || res == RADIOLIB_ERR_SPI_CMD_FAILED)
         return false;
 
     LOG_INFO("Frequency set to %f", getFreq());
@@ -109,7 +111,7 @@ template <typename T> bool SX126xInterface<T>::init()
         bool dio2AsRfSwitch = true;
 #elif defined(ARCH_PORTDUINO)
         bool dio2AsRfSwitch = false;
-        if (settingsMap[dio2_as_rf_switch]) {
+        if (portduino_config.dio2_as_rf_switch) {
             dio2AsRfSwitch = true;
         }
 #else
@@ -119,12 +121,13 @@ template <typename T> bool SX126xInterface<T>::init()
         LOG_DEBUG("Set DIO2 as %sRF switch, result: %d", dio2AsRfSwitch ? "" : "not ", res);
     }
 
-    // If a pin isn't defined, we set it to RADIOLIB_NC, it is safe to always do external RF switching with RADIOLIB_NC as it has
-    // no effect
+// If a pin isn't defined, we set it to RADIOLIB_NC, it is safe to always do external RF switching with RADIOLIB_NC as it has
+// no effect
 #if ARCH_PORTDUINO
     if (res == RADIOLIB_ERR_NONE) {
-        LOG_DEBUG("Use MCU pin %i as RXEN and pin %i as TXEN to control RF switching", settingsMap[rxen], settingsMap[txen]);
-        lora.setRfSwitchPins(settingsMap[rxen], settingsMap[txen]);
+        LOG_DEBUG("Use MCU pin %i as RXEN and pin %i as TXEN to control RF switching", portduino_config.lora_rxen_pin.pin,
+                  portduino_config.lora_txen_pin.pin);
+        lora.setRfSwitchPins(portduino_config.lora_rxen_pin.pin, portduino_config.lora_txen_pin.pin);
     }
 #else
 #ifndef SX126X_RXEN
@@ -263,12 +266,14 @@ template <typename T> void SX126xInterface<T>::addReceiveMetadata(meshtastic_Mes
     // LOG_DEBUG("PacketStatus %x", lora.getPacketStatus());
     mp->rx_snr = lora.getSNR();
     mp->rx_rssi = lround(lora.getRSSI());
+    LOG_DEBUG("Corrected frequency offset: %f", lora.getFrequencyError());
 }
 
 /** We override to turn on transmitter power as needed.
  */
 template <typename T> void SX126xInterface<T>::configHardwareForSend()
 {
+    setTransmitEnable(true);
     RadioLibInterface::configHardwareForSend();
 }
 
@@ -281,11 +286,11 @@ template <typename T> void SX126xInterface<T>::startReceive()
     sleep();
 #else
 
+    setTransmitEnable(false);
     setStandby();
 
     // We use a 16 bit preamble so this should save some power by letting radio sit in standby mostly.
-    // Furthermore, we need the PREAMBLE_DETECTED and HEADER_VALID IRQ flag to detect whether we are actively receiving
-    int err = lora.startReceiveDutyCycleAuto(preambleLength, 8, RADIOLIB_IRQ_RX_DEFAULT_FLAGS | RADIOLIB_IRQ_PREAMBLE_DETECTED);
+    int err = lora.startReceiveDutyCycleAuto(preambleLength, 8, MESHTASTIC_RADIOLIB_IRQ_RX_FLAGS);
     if (err != RADIOLIB_ERR_NONE)
         LOG_ERROR("SX126X startReceiveDutyCycleAuto %s%d", radioLibErr, err);
     assert(err == RADIOLIB_ERR_NONE);
@@ -301,10 +306,17 @@ template <typename T> void SX126xInterface<T>::startReceive()
 template <typename T> bool SX126xInterface<T>::isChannelActive()
 {
     // check if we can detect a LoRa preamble on the current channel
+    ChannelScanConfig_t cfg = {.cad = {.symNum = NUM_SYM_CAD,
+                                       .detPeak = RADIOLIB_SX126X_CAD_PARAM_DEFAULT,
+                                       .detMin = RADIOLIB_SX126X_CAD_PARAM_DEFAULT,
+                                       .exitMode = RADIOLIB_SX126X_CAD_PARAM_DEFAULT,
+                                       .timeout = 0,
+                                       .irqFlags = RADIOLIB_IRQ_CAD_DEFAULT_FLAGS,
+                                       .irqMask = RADIOLIB_IRQ_CAD_DEFAULT_MASK}};
     int16_t result;
-
+    setTransmitEnable(false);
     setStandby();
-    result = lora.scanChannel();
+    result = lora.scanChannel(cfg);
     if (result == RADIOLIB_LORA_DETECTED)
         return true;
     if (result != RADIOLIB_CHANNEL_FREE)
@@ -341,6 +353,26 @@ template <typename T> bool SX126xInterface<T>::sleep()
     digitalWrite(SX126X_POWER_EN, LOW);
 #endif
 
+#if defined(USE_GC1109_PA)
+    /*
+     * Do not switch the power on and off frequently.
+     * After turning off LORA_PA_EN, the power consumption has dropped to the uA level.
+     *  // digitalWrite(LORA_PA_POWER, LOW);
+     */
+    digitalWrite(LORA_PA_EN, LOW);
+    digitalWrite(LORA_PA_TX_EN, LOW);
+#endif
     return true;
 }
+
+/** Some boards require GPIO control of tx vs rx paths */
+template <typename T> void SX126xInterface<T>::setTransmitEnable(bool txon)
+{
+#if defined(USE_GC1109_PA)
+    digitalWrite(LORA_PA_POWER, HIGH);
+    digitalWrite(LORA_PA_EN, HIGH);
+    digitalWrite(LORA_PA_TX_EN, txon ? 1 : 0);
+#endif
+}
+
 #endif

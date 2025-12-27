@@ -1,6 +1,6 @@
 #include "configuration.h"
 
-#if HAS_TELEMETRY && !MESHTASTIC_EXCLUDE_ENVIRONMENTAL_SENSOR
+#if HAS_TELEMETRY && !MESHTASTIC_EXCLUDE_ENVIRONMENTAL_SENSOR && __has_include(<Adafruit_INA219.h>)
 
 #include "../mesh/generated/meshtastic/telemetry.pb.h"
 #include "INA219Sensor.h"
@@ -43,6 +43,11 @@ bool INA219Sensor::getMetrics(meshtastic_Telemetry *measurement)
 uint16_t INA219Sensor::getBusVoltageMv()
 {
     return lround(ina219.getBusVoltage_V() * 1000);
+}
+
+int16_t INA219Sensor::getCurrentMa()
+{
+    return lround(ina219.getCurrent_mA());
 }
 
 #endif

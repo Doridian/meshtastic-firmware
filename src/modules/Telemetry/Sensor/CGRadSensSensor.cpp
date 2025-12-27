@@ -14,21 +14,15 @@
 
 CGRadSensSensor::CGRadSensSensor() : TelemetrySensor(meshtastic_TelemetrySensorType_RADSENS, "RadSens") {}
 
-int32_t CGRadSensSensor::runOnce()
+bool CGRadSensSensor::initDevice(TwoWire *bus, ScanI2C::FoundDevice *dev)
 {
     // Initialize the sensor following the same pattern as RCWL9620Sensor
     LOG_INFO("Init sensor: %s", sensorName);
-    if (!hasSensor()) {
-        return DEFAULT_SENSOR_MINIMUM_WAIT_TIME_BETWEEN_READS;
-    }
-
     status = true;
-    begin(nodeTelemetrySensorsMap[sensorType].second, nodeTelemetrySensorsMap[sensorType].first);
-
-    return initI2CSensor();
+    begin(bus, dev->address.address);
+    initI2CSensor();
+    return status;
 }
-
-void CGRadSensSensor::setup() {}
 
 void CGRadSensSensor::begin(TwoWire *wire, uint8_t addr)
 {
@@ -41,13 +35,12 @@ void CGRadSensSensor::begin(TwoWire *wire, uint8_t addr)
 float CGRadSensSensor::getStaticRadiation()
 {
     // Read a register, following the same pattern as the RCWL9620Sensor
-    uint32_t data;
     _wire->beginTransmission(_addr); // Transfer data to addr.
     _wire->write(0x06);              // Radiation intensity (static period T = 500 sec)
     if (_wire->endTransmission() == 0) {
         if (_wire->requestFrom(_addr, (uint8_t)3)) {
             ; // Request 3 bytes
-            data = _wire->read();
+            uint32_t data = _wire->read();
             data <<= 8;
             data |= _wire->read();
             data <<= 8;

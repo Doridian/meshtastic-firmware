@@ -1,5 +1,4 @@
 #pragma once
-#include "../variants/rak2560/RAK9154Sensor.h"
 #include "PowerStatus.h"
 #include "concurrency/OSThread.h"
 #include "configuration.h"
@@ -14,6 +13,7 @@
 #define NUM_OCV_POINTS 11
 #endif
 
+// Device specific curves go in variant.h
 #ifndef OCV_ARRAY
 #ifdef CELL_TYPE_LIFEPO4
 #define OCV_ARRAY 3400, 3350, 3320, 3290, 3270, 3260, 3250, 3230, 3200, 3120, 3000
@@ -40,22 +40,49 @@ extern RTC_NOINIT_ATTR uint64_t RTC_reg_b;
 #include "soc/sens_reg.h" // needed for adc pin reset
 #endif
 
-#if HAS_TELEMETRY && !MESHTASTIC_EXCLUDE_ENVIRONMENTAL_SENSOR && !defined(ARCH_PORTDUINO)
+#if HAS_TELEMETRY && !MESHTASTIC_EXCLUDE_ENVIRONMENTAL_SENSOR
+#include "modules/Telemetry/Sensor/nullSensor.h"
+#if __has_include(<Adafruit_INA219.h>)
 #include "modules/Telemetry/Sensor/INA219Sensor.h"
-#include "modules/Telemetry/Sensor/INA260Sensor.h"
-#include "modules/Telemetry/Sensor/INA3221Sensor.h"
-extern INA260Sensor ina260Sensor;
 extern INA219Sensor ina219Sensor;
-extern INA3221Sensor ina3221Sensor;
+#else
+extern NullSensor ina219Sensor;
 #endif
 
-#if HAS_TELEMETRY && !MESHTASTIC_EXCLUDE_ENVIRONMENTAL_SENSOR && !defined(ARCH_PORTDUINO) && !defined(ARCH_STM32WL)
+#if __has_include(<INA226.h>)
+#include "modules/Telemetry/Sensor/INA226Sensor.h"
+extern INA226Sensor ina226Sensor;
+#else
+extern NullSensor ina226Sensor;
+#endif
+
+#if __has_include(<Adafruit_INA260.h>)
+#include "modules/Telemetry/Sensor/INA260Sensor.h"
+extern INA260Sensor ina260Sensor;
+#else
+extern NullSensor ina260Sensor;
+#endif
+
+#if __has_include(<INA3221.h>)
+#include "modules/Telemetry/Sensor/INA3221Sensor.h"
+extern INA3221Sensor ina3221Sensor;
+#else
+extern NullSensor ina3221Sensor;
+#endif
+
+#endif
+
+#if HAS_TELEMETRY && !MESHTASTIC_EXCLUDE_ENVIRONMENTAL_SENSOR
+#if __has_include(<Adafruit_MAX1704X.h>)
 #include "modules/Telemetry/Sensor/MAX17048Sensor.h"
 extern MAX17048Sensor max17048Sensor;
+#else
+extern NullSensor max17048Sensor;
+#endif
 #endif
 
-#if HAS_RAKPROT && !defined(ARCH_PORTDUINO)
-#include "../variants/rak2560/RAK9154Sensor.h"
+#if HAS_TELEMETRY && !MESHTASTIC_EXCLUDE_ENVIRONMENTAL_SENSOR && HAS_RAKPROT
+#include "modules/Telemetry/Sensor/RAK9154Sensor.h"
 extern RAK9154Sensor rak9154Sensor;
 #endif
 
@@ -74,7 +101,7 @@ class Power : private concurrency::OSThread
 
     Power();
 
-    void shutdown();
+    void powerCommandsCheck();
     void readPowerStatus();
     virtual bool setup();
     virtual int32_t runOnce() override;
@@ -90,13 +117,22 @@ class Power : private concurrency::OSThread
     bool analogInit();
     /// Setup a Lipo battery level sensor
     bool lipoInit();
+    /// Setup a Lipo charger
+    bool lipoChargerInit();
+    /// Setup a meshSolar battery sensor
+    bool meshSolarInit();
 
   private:
+    void shutdown();
+    void reboot();
     // open circuit voltage lookup table
     uint8_t low_voltage_counter;
+    uint32_t lastLogTime = 0;
 #ifdef DEBUG_HEAP
     uint32_t lastheap;
 #endif
 };
+
+void battery_adcEnable();
 
 extern Power *power;

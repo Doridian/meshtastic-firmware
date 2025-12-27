@@ -1,6 +1,6 @@
 #include "QMA6100PSensor.h"
 
-#if !defined(ARCH_PORTDUINO) && !defined(ARCH_STM32WL) && !MESHTASTIC_EXCLUDE_I2C && defined(HAS_QMA6100P)
+#if !defined(ARCH_STM32WL) && !MESHTASTIC_EXCLUDE_I2C && defined(HAS_QMA6100P)
 
 // Flag when an interrupt has been detected
 volatile static bool QMA6100P_IRQ = false;
@@ -88,13 +88,13 @@ bool QMA6100PSingleton::init(ScanI2C::FoundDevice device)
     bool status = begin(device.address.address, &Wire);
 #endif
     if (status != true) {
-        LOG_WARN("QMA6100P init begin failed\n");
+        LOG_WARN("QMA6100P init begin failed");
         return false;
     }
     delay(20);
     // SW reset to make sure the device starts in a known state
     if (softwareReset() != true) {
-        LOG_WARN("QMA6100P init reset failed\n");
+        LOG_WARN("QMA6100P init reset failed");
         return false;
     }
     delay(20);

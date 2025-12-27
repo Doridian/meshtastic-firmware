@@ -1,15 +1,16 @@
 #include "configuration.h"
 
-#if !MESHTASTIC_EXCLUDE_ENVIRONMENTAL_SENSOR
+#if !MESHTASTIC_EXCLUDE_ENVIRONMENTAL_SENSOR && __has_include(<bsec2.h>)
 
 #include "../mesh/generated/meshtastic/telemetry.pb.h"
 #include "BME680Sensor.h"
 #include "FSCommon.h"
+#include "SPILock.h"
 #include "TelemetrySensor.h"
 
 BME680Sensor::BME680Sensor() : TelemetrySensor(meshtastic_TelemetrySensorType_BME680, "BME680") {}
 
-int32_t BME680Sensor::runTrigger()
+int32_t BME680Sensor::runOnce()
 {
     if (!bme680.run()) {
         checkStatus("runTrigger");
@@ -17,13 +18,10 @@ int32_t BME680Sensor::runTrigger()
     return 35;
 }
 
-int32_t BME680Sensor::runOnce()
+bool BME680Sensor::initDevice(TwoWire *bus, ScanI2C::FoundDevice *dev)
 {
-
-    if (!hasSensor()) {
-        return DEFAULT_SENSOR_MINIMUM_WAIT_TIME_BETWEEN_READS;
-    }
-    if (!bme680.begin(nodeTelemetrySensorsMap[sensorType].first, *nodeTelemetrySensorsMap[sensorType].second))
+    status = 0;
+    if (!bme680.begin(dev->address.address, *bus))
         checkStatus("begin");
 
     if (bme680.status == BSEC_OK) {
@@ -39,16 +37,14 @@ int32_t BME680Sensor::runOnce()
         }
         LOG_INFO("Init sensor: %s with the BSEC Library version %d.%d.%d.%d ", sensorName, bme680.version.major,
                  bme680.version.minor, bme680.version.major_bugfix, bme680.version.minor_bugfix);
-    } else {
-        status = 0;
     }
+
     if (status == 0)
         LOG_DEBUG("BME680Sensor::runOnce: bme680.status %d", bme680.status);
 
-    return initI2CSensor();
+    initI2CSensor();
+    return status;
 }
-
-void BME680Sensor::setup() {}
 
 bool BME680Sensor::getMetrics(meshtastic_Telemetry *measurement)
 {
@@ -75,6 +71,7 @@ bool BME680Sensor::getMetrics(meshtastic_Telemetry *measurement)
 void BME680Sensor::loadState()
 {
 #ifdef FSCom
+    spiLock->lock();
     auto file = FSCom.open(bsecConfigFileName, FILE_O_READ);
     if (file) {
         file.read((uint8_t *)&bsecState, BSEC_MAX_STATE_BLOB_SIZE);
@@ -84,6 +81,7 @@ void BME680Sensor::loadState()
     } else {
         LOG_INFO("No %s state found (File: %s)", sensorName, bsecConfigFileName);
     }
+    spiLock->unlock();
 #else
     LOG_ERROR("ERROR: Filesystem not implemented");
 #endif
@@ -92,6 +90,7 @@ void BME680Sensor::loadState()
 void BME680Sensor::updateState()
 {
 #ifdef FSCom
+    spiLock->lock();
     bool update = false;
     if (stateUpdateCounter == 0) {
         /* First state update when IAQ accuracy is >= 3 */
@@ -127,22 +126,23 @@ void BME680Sensor::updateState()
             LOG_INFO("Can't write %s state (File: %s)", sensorName, bsecConfigFileName);
         }
     }
+    spiLock->unlock();
 #else
     LOG_ERROR("ERROR: Filesystem not implemented");
 #endif
 }
 
-void BME680Sensor::checkStatus(String functionName)
+void BME680Sensor::checkStatus(const char *functionName)
 {
     if (bme680.status < BSEC_OK)
-        LOG_ERROR("%s BSEC2 code: %s", functionName.c_str(), String(bme680.status).c_str());
+        LOG_ERROR("%s BSEC2 code: %d", functionName, bme680.status);
     else if (bme680.status > BSEC_OK)
-        LOG_WARN("%s BSEC2 code: %s", functionName.c_str(), String(bme680.status).c_str());
+        LOG_WARN("%s BSEC2 code: %d", functionName, bme680.status);
 
     if (bme680.sensor.status < BME68X_OK)
-        LOG_ERROR("%s BME68X code: %s", functionName.c_str(), String(bme680.sensor.status).c_str());
+        LOG_ERROR("%s BME68X code: %d", functionName, bme680.sensor.status);
     else if (bme680.sensor.status > BME68X_OK)
-        LOG_WARN("%s BME68X code: %s", functionName.c_str(), String(bme680.sensor.status).c_str());
+        LOG_WARN("%s BME68X code: %d", functionName, bme680.sensor.status);
 }
 
 #endif

@@ -1,6 +1,6 @@
 #include "configuration.h"
 
-#if HAS_TELEMETRY && !MESHTASTIC_EXCLUDE_ENVIRONMENTAL_SENSOR
+#if HAS_TELEMETRY && !MESHTASTIC_EXCLUDE_ENVIRONMENTAL_SENSOR && __has_include(<INA3221.h>)
 
 #include "../mesh/generated/meshtastic/telemetry.pb.h"
 #include "INA3221Sensor.h"
@@ -100,6 +100,11 @@ bool INA3221Sensor::getPowerMetrics(meshtastic_Telemetry *measurement)
 uint16_t INA3221Sensor::getBusVoltageMv()
 {
     return lround(ina3221.getVoltage(BAT_CH) * 1000);
+}
+
+int16_t INA3221Sensor::getCurrentMa()
+{
+    return lround(ina3221.getCurrent(BAT_CH));
 }
 
 #endif
